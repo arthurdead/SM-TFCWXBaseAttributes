@@ -23,8 +23,9 @@
 #include <stocksoup/tf/entity_prop_stocks>
 #include <stocksoup/tf/econ>
 #include <tf_econ_data>
-
 #include <tf2utils>
+#include <animhelpers>
+#include <cwx>
 
 #define EF_NODRAW (1 << 5)
 #define EF_BONEMERGE (1 << 0)
@@ -45,9 +46,18 @@ int g_iLastWorldModelRef[MAXPLAYERS + 1] = { INVALID_ENT_REFERENCE, ... };
 
 int g_iLastOffHandViewmodelRef[MAXPLAYERS + 1] = { INVALID_ENT_REFERENCE, ... };
 
-StringMap g_MissingModels;
+bool filterItemWithModels(const char[] uid, any data) {
+	return (
+		CWX_ItemHasCustomAttribute(uid, "clientmodel override") ||
+		CWX_ItemHasCustomAttribute(uid, "viewmodel override") ||
+		CWX_ItemHasCustomAttribute(uid, "worldmodel override") ||
+		CWX_ItemHasCustomAttribute(uid, "arm model override")
+	);
+}
 
-public void OnMapStart() {
+ArrayList g_aModels;
+
+public void OnPluginStart() {
 	for (int i = 1; i <= MaxClients; i++) {
 		if (IsClientInGame(i)) {
 			OnClientPutInServer(i);
@@ -56,9 +66,55 @@ public void OnMapStart() {
 	HookEvent("player_death", OnPlayerDeath);
 	HookEvent("post_inventory_application", OnInventoryAppliedPost);
 	HookEvent("player_sapped_object", OnObjectSappedPost);
-	
-	delete g_MissingModels;
-	g_MissingModels = new StringMap();
+
+	g_aModels = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
+}
+
+public void OnAllPluginsLoaded() {
+	ArrayList itemsWithModels = CWX_GetItemList(filterItemWithModels);
+	int len = itemsWithModels.Length;
+	char uid[MAX_ITEM_IDENTIFIER_LENGTH];
+	char model[PLATFORM_MAX_PATH];
+	for(int i = 0; i < len; ++i) {
+		itemsWithModels.GetString(i, uid, MAX_ITEM_IDENTIFIER_LENGTH);
+
+		KeyValues attributes = CWX_GetItemCustomAttributes(uid);
+
+		attributes.GetString("clientmodel override", model, PLATFORM_MAX_PATH);
+		if(model[0] != '\0') {
+			g_aModels.PushString(model);
+		}
+
+		attributes.GetString("viewmodel override", model, PLATFORM_MAX_PATH);
+		if(model[0] != '\0') {
+			g_aModels.PushString(model);
+		}
+
+		attributes.GetString("worldmodel override", model, PLATFORM_MAX_PATH);
+		if(model[0] != '\0') {
+			g_aModels.PushString(model);
+		}
+
+		attributes.GetString("arm model override", model, PLATFORM_MAX_PATH);
+		if(model[0] != '\0') {
+			g_aModels.PushString(model);
+		}
+
+		delete attributes;
+	}
+	delete itemsWithModels;
+}
+
+public void OnMapStart() {
+	char model[PLATFORM_MAX_PATH];
+
+	int len = g_aModels.Length;
+	for(int i = 0; i < len; ++i) {
+		g_aModels.GetString(i, model, PLATFORM_MAX_PATH);
+
+		PrecacheModel(model);
+		AddModelToDownloadsTable(model);
+	}
 }
 
 public void OnPluginEnd() {
@@ -98,10 +154,8 @@ void OnDroppedWeaponSpawnPost(int weapon) {
 	char wm[PLATFORM_MAX_PATH];
 	if (TF2CustAttr_GetString(weapon, "clientmodel override", wm, sizeof(wm))
 			|| TF2CustAttr_GetString(weapon, "worldmodel override", wm, sizeof(wm))) {
-		if (FileExists(wm, true)) {
-			SetEntityModel(weapon, wm);
-			SetWeaponWorldModel(weapon, wm);
-		}
+		SetEntityModel(weapon, wm);
+		SetWeaponWorldModel(weapon, wm);
 	}
 }
 
@@ -156,10 +210,9 @@ void UpdateClientWeaponModel(int client) {
 	TF2CustAttr_GetString(weapon, "clientmodel override", cm, sizeof(cm));
 	
 	char vm[PLATFORM_MAX_PATH];
-	if (TF2CustAttr_GetString(weapon, "viewmodel override", vm, sizeof(vm), cm)
-			&& FileExistsAndLog(vm, true)) {
+	if (TF2CustAttr_GetString(weapon, "viewmodel override", vm, sizeof(vm), cm)) {
 		// override viewmodel by attaching arm and weapon viewmodels
-		PrecacheModelAndLog(vm);
+		PrecacheModel(vm);
 		
 		int weaponvm = TF2_SpawnWearableViewmodel();
 		
@@ -171,8 +224,7 @@ void UpdateClientWeaponModel(int client) {
 	}
 	
 	char wm[PLATFORM_MAX_PATH];
-	if (TF2CustAttr_GetString(weapon, "worldmodel override", wm, sizeof(wm), cm)
-			&& FileExistsAndLog(wm, true)) {
+	if (TF2CustAttr_GetString(weapon, "worldmodel override", wm, sizeof(wm), cm)) {
 		// this allows other players to see the given weapon with the correct model
 		SetWeaponWorldModel(weapon, wm);
 		
@@ -259,9 +311,8 @@ void UpdateClientWeaponModel(int client) {
 		int shield = TF2Util_GetPlayerLoadoutEntity(client, 1);
 		char ohvm[PLATFORM_MAX_PATH];
 		if (IsValidEntity(shield) && TF2Util_IsEntityWearable(shield)
-				&& TF2CustAttr_GetString(shield, "clientmodel override", ohvm, sizeof(ohvm))
-				&& FileExistsAndLog(ohvm, true)) {
-			PrecacheModelAndLog(ohvm);
+				&& TF2CustAttr_GetString(shield, "clientmodel override", ohvm, sizeof(ohvm))) {
+			PrecacheModel(ohvm);
 			SetEntityModel(shield, ohvm);
 			
 			if (TF2Util_IsEntityWeapon(weapon)
@@ -288,11 +339,10 @@ void UpdateClientWeaponModel(int client) {
 		return;
 	}
 	
-	if ((armvmPath[0] || GetArmViewModel(client, armvmPath, sizeof(armvmPath)))
-			&& FileExistsAndLog(armvmPath, true)) {
+	if ((armvmPath[0] || GetArmViewModel(client, armvmPath, sizeof(armvmPath)))) {
 		// armvmPath might not be precached on the server
 		// mainly an issue with the gunslinger variation of the arm model for stock
-		PrecacheModelAndLog(armvmPath);
+		PrecacheModel(armvmPath);
 		
 		int armvm = TF2_SpawnWearableViewmodel();
 		
@@ -315,7 +365,7 @@ void UpdateClientWeaponModel(int client) {
 				return;
 			}
 			
-			PrecacheModelAndLog(vm);
+			PrecacheModel(vm);
 			
 			int weaponvm = TF2_SpawnWearableViewmodel();
 			
@@ -362,11 +412,7 @@ void OnObjectSappedPost(Event event, const char[] name, bool dontBroadcast) {
 }
 
 bool SetWeaponWorldModel(int weapon, const char[] worldmodel) {
-	if (!FileExists(worldmodel, true)) {
-		return false;
-	}
-	
-	int model = PrecacheModelAndLog(worldmodel);
+	int model = PrecacheModel(worldmodel);
 	if (HasEntProp(weapon, Prop_Send, "m_iWorldModelIndex")) {
 		SetEntProp(weapon, Prop_Send, "m_iWorldModelIndex", model);
 	}
@@ -387,9 +433,6 @@ bool SetWeaponWorldModel(int weapon, const char[] worldmodel) {
  * Sets the model on the given building-attached sapper.
  */
 bool SetAttachedSapperModel(int sapper, const char[] worldmodel) {
-	if (!FileExists(worldmodel, true)) {
-		return false;
-	}
 	SetEntityModel(sapper, worldmodel);
 	return true;
 }
@@ -468,26 +511,4 @@ stock int TF2_SpawnWearableViewmodel() {
 		DispatchSpawn(wearable);
 	}
 	return wearable;
-}
-
-bool FileExistsAndLog(const char[] path, bool use_valve_fs = false,
-		const char[] valve_path_id = "GAME") {
-	if (FileExists(path, use_valve_fs, valve_path_id)) {
-		return true;
-	}
-	
-	any discarded;
-	if (!g_MissingModels.GetValue(path, discarded)) {
-		LogError("Missing file '%s'", path);
-		g_MissingModels.SetValue(path, true);
-	}
-	return false;
-}
-
-int PrecacheModelAndLog(const char[] model, bool preload = false) {
-	int modelIndex = PrecacheModel(model, preload);
-	if (!modelIndex) {
-		LogError("Failed to precache model '%s'", model);
-	}
-	return modelIndex;
 }
