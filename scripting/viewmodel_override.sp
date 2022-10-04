@@ -56,6 +56,13 @@ bool filterItemWithModels(const char[] uid, any data) {
 }
 
 ArrayList g_aModels;
+bool late_loaded;
+
+public APLRes AskPluginLoad2(Handle self, bool late, char[] error, int maxlen)
+{
+	late_loaded = late;
+	return APLRes_Success;
+}
 
 public void OnPluginStart() {
 	for (int i = 1; i <= MaxClients; i++) {
@@ -70,7 +77,8 @@ public void OnPluginStart() {
 	g_aModels = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
 }
 
-public void OnAllPluginsLoaded() {
+public void CWX_ItemsLoaded()
+{
 	ArrayList itemsWithModels = CWX_GetItemList(filterItemWithModels);
 	int len = itemsWithModels.Length;
 	char uid[MAX_ITEM_IDENTIFIER_LENGTH];
@@ -103,6 +111,12 @@ public void OnAllPluginsLoaded() {
 		delete attributes;
 	}
 	delete itemsWithModels;
+}
+
+public void OnAllPluginsLoaded() {
+	if(late_loaded) {
+		CWX_ItemsLoaded();
+	}
 }
 
 public void OnMapStart() {
@@ -203,6 +217,8 @@ void UpdateClientWeaponModel(int client) {
 	if (!IsValidEntity(weapon)) {
 		return;
 	}
+
+	SetEntProp(weapon, Prop_Send, "m_bBeingRepurposedForTaunt", 0);
 	
 	int bitsActiveModels = MODEL_NONE_ACTIVE;
 	
@@ -211,9 +227,6 @@ void UpdateClientWeaponModel(int client) {
 	
 	char vm[PLATFORM_MAX_PATH];
 	if (TF2CustAttr_GetString(weapon, "viewmodel override", vm, sizeof(vm), cm)) {
-		// override viewmodel by attaching arm and weapon viewmodels
-		PrecacheModel(vm);
-		
 		int weaponvm = TF2_SpawnWearableViewmodel();
 		
 		SetEntityModel(weaponvm, vm);
@@ -309,7 +322,6 @@ void UpdateClientWeaponModel(int client) {
 		char ohvm[PLATFORM_MAX_PATH];
 		if (IsValidEntity(shield) && TF2Util_IsEntityWearable(shield)
 				&& TF2CustAttr_GetString(shield, "clientmodel override", ohvm, sizeof(ohvm))) {
-			PrecacheModel(ohvm);
 			SetEntityModel(shield, ohvm);
 			
 			if (TF2Util_IsEntityWeapon(weapon)
@@ -325,7 +337,7 @@ void UpdateClientWeaponModel(int client) {
 			}
 		}
 	}
-	
+
 	char armvmPath[PLATFORM_MAX_PATH];
 	if (!TF2CustAttr_GetString(weapon, "arm model override", armvmPath, sizeof(armvmPath))
 			&& bitsActiveModels & (MODEL_VIEW_ACTIVE | MODEL_OFFHAND_ACTIVE | MODEL_WORLD_ACTIVE) == 0) {
@@ -335,12 +347,10 @@ void UpdateClientWeaponModel(int client) {
 		// ... or if we are using a custom arm model
 		return;
 	}
-	
-	if ((armvmPath[0] || GetArmViewModel(client, armvmPath, sizeof(armvmPath)))) {
-		// armvmPath might not be precached on the server
-		// mainly an issue with the gunslinger variation of the arm model for stock
-		PrecacheModel(armvmPath);
-		
+
+	SetEntProp(weapon, Prop_Send, "m_bBeingRepurposedForTaunt", 1);
+
+	if (armvmPath[0] != '\0') {
 		int armvm = TF2_SpawnWearableViewmodel();
 		
 		SetEntityModel(armvm, armvmPath);
@@ -361,8 +371,6 @@ void UpdateClientWeaponModel(int client) {
 			if (!TF2Econ_GetItemDefinitionString(itemdef, "model_player", vm, sizeof(vm))) {
 				return;
 			}
-			
-			PrecacheModel(vm);
 			
 			int weaponvm = TF2_SpawnWearableViewmodel();
 			
@@ -410,9 +418,7 @@ void OnObjectSappedPost(Event event, const char[] name, bool dontBroadcast) {
 
 bool SetWeaponWorldModel(int weapon, const char[] worldmodel) {
 	int model = PrecacheModel(worldmodel);
-	if (HasEntProp(weapon, Prop_Send, "m_iWorldModelIndex")) {
-		SetEntProp(weapon, Prop_Send, "m_iWorldModelIndex", model);
-	}
+	SetEntProp(weapon, Prop_Send, "m_iWorldModelIndex", model);
 	
 	/**
 	 * setting m_nModelIndexOverrides causes firing animations to break, but prevents the
