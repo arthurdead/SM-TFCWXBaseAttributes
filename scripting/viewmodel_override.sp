@@ -57,6 +57,7 @@ bool filterItemWithModels(const char[] uid, any data) {
 
 ArrayList g_aModels;
 bool late_loaded;
+bool playermodel2_loaded;
 
 public APLRes AskPluginLoad2(Handle self, bool late, char[] error, int maxlen)
 {
@@ -117,6 +118,8 @@ public void OnAllPluginsLoaded() {
 	if(late_loaded) {
 		CWX_ItemsLoaded();
 	}
+
+	playermodel2_loaded = LibraryExists("playermodel2");
 }
 
 public void OnMapStart() {
@@ -212,30 +215,30 @@ void OnWeaponSwitchPost(int client, int weapon) {
  */
 void UpdateClientWeaponModel(int client) {
 	DetachVMs(client);
-	
+
 	int weapon = TF2_GetClientActiveWeapon(client);
 	if (!IsValidEntity(weapon)) {
 		return;
 	}
 
-	SetEntProp(weapon, Prop_Send, "m_bBeingRepurposedForTaunt", 0);
-	
 	int bitsActiveModels = MODEL_NONE_ACTIVE;
 	
 	char cm[PLATFORM_MAX_PATH];
 	TF2CustAttr_GetString(weapon, "clientmodel override", cm, sizeof(cm));
-	
-	char vm[PLATFORM_MAX_PATH];
-	if (TF2CustAttr_GetString(weapon, "viewmodel override", vm, sizeof(vm), cm)) {
-		int weaponvm = TF2_SpawnWearableViewmodel();
-		
-		SetEntityModel(weaponvm, vm);
-		TF2Util_EquipPlayerWearable(client, weaponvm);
-		
-		g_iLastViewmodelRef[client] = EntIndexToEntRef(weaponvm);
-		bitsActiveModels |= MODEL_VIEW_ACTIVE;
+
+	if(!playermodel2_loaded) {
+		char vm[PLATFORM_MAX_PATH];
+		if (TF2CustAttr_GetString(weapon, "viewmodel override", vm, sizeof(vm), cm)) {
+			int weaponvm = TF2_SpawnWearableViewmodel();
+			
+			SetEntityModel(weaponvm, vm);
+			TF2Util_EquipPlayerWearable(client, weaponvm);
+			
+			g_iLastViewmodelRef[client] = EntIndexToEntRef(weaponvm);
+			bitsActiveModels |= MODEL_VIEW_ACTIVE;
+		}
 	}
-	
+
 	char wm[PLATFORM_MAX_PATH];
 	if (TF2CustAttr_GetString(weapon, "worldmodel override", wm, sizeof(wm), cm)) {
 		// this allows other players to see the given weapon with the correct model
@@ -258,32 +261,34 @@ void UpdateClientWeaponModel(int client) {
 		// custom view- / world- model positioning options
 		KeyValues attrKv = TF2CustAttr_GetAttributeKeyValues(weapon);
 		if (attrKv) {
-			if (bitsActiveModels & MODEL_VIEW_ACTIVE
-					&& attrKv.JumpToKey("viewmodel override offset")) {
-				int weaponvm = g_iLastViewmodelRef[client];
-				
-				int weapomvm_effects = GetEntProp(weaponvm, Prop_Send, "m_fEffects");
-				weapomvm_effects &= ~EF_BONEMERGE;
-				SetEntProp(weaponvm, Prop_Send, "m_fEffects", weapomvm_effects);
-				
-				SetVariantString("!activator");
-				AcceptEntityInput(weaponvm, "SetParent", weapon);
-				
-				SetVariantString("weapon_bone");
-				AcceptEntityInput(weaponvm, "SetParentAttachment");
-				
-				float posOffset[3];
-				attrKv.GetVector("pos", posOffset);
-				SetEntPropVector(weaponvm, Prop_Send, "m_vecOrigin", posOffset);
-				
-				float angOffset[3];
-				attrKv.GetVector("ang", angOffset);
-				SetEntPropVector(weaponvm, Prop_Send, "m_angRotation", angOffset);
-				
-				float modelScale = attrKv.GetFloat("scale", 1.0);
-				SetEntPropFloat(weaponvm, Prop_Send, "m_flModelScale", modelScale);
-				
-				attrKv.GoBack();
+			if(!playermodel2_loaded) {
+				if (bitsActiveModels & MODEL_VIEW_ACTIVE
+						&& attrKv.JumpToKey("viewmodel override offset")) {
+					int weaponvm = g_iLastViewmodelRef[client];
+					
+					int weapomvm_effects = GetEntProp(weaponvm, Prop_Send, "m_fEffects");
+					weapomvm_effects &= ~EF_BONEMERGE;
+					SetEntProp(weaponvm, Prop_Send, "m_fEffects", weapomvm_effects);
+					
+					SetVariantString("!activator");
+					AcceptEntityInput(weaponvm, "SetParent", weapon);
+					
+					SetVariantString("weapon_bone");
+					AcceptEntityInput(weaponvm, "SetParentAttachment");
+					
+					float posOffset[3];
+					attrKv.GetVector("pos", posOffset);
+					SetEntPropVector(weaponvm, Prop_Send, "m_vecOrigin", posOffset);
+					
+					float angOffset[3];
+					attrKv.GetVector("ang", angOffset);
+					SetEntPropVector(weaponvm, Prop_Send, "m_angRotation", angOffset);
+					
+					float modelScale = attrKv.GetFloat("scale", 1.0);
+					SetEntPropFloat(weaponvm, Prop_Send, "m_flModelScale", modelScale);
+					
+					attrKv.GoBack();
+				}
 			}
 			if (bitsActiveModels & MODEL_WORLD_ACTIVE
 					&& attrKv.JumpToKey("worldmodel override offset")) {
@@ -338,48 +343,49 @@ void UpdateClientWeaponModel(int client) {
 		}
 	}
 
-	char armvmPath[PLATFORM_MAX_PATH];
-	if (!TF2CustAttr_GetString(weapon, "arm model override", armvmPath, sizeof(armvmPath))
-			&& bitsActiveModels & (MODEL_VIEW_ACTIVE | MODEL_OFFHAND_ACTIVE | MODEL_WORLD_ACTIVE) == 0) {
-		// we need to attach arm viewmodels if we render a new weapon viewmodel
-		// or if we have something attached to our offhand
-		// ... or if we have a new worldmodel as of the 2021-06-22 update
-		// ... or if we are using a custom arm model
-		return;
-	}
+	if(!playermodel2_loaded) {
+		char armvmPath[PLATFORM_MAX_PATH];
+		if (!TF2CustAttr_GetString(weapon, "arm model override", armvmPath, sizeof(armvmPath))
+				&& bitsActiveModels & (MODEL_VIEW_ACTIVE | MODEL_OFFHAND_ACTIVE | MODEL_WORLD_ACTIVE) == 0) {
+			// we need to attach arm viewmodels if we render a new weapon viewmodel
+			// or if we have something attached to our offhand
+			// ... or if we have a new worldmodel as of the 2021-06-22 update
+			// ... or if we are using a custom arm model
+			return;
+		}
 
-	SetEntProp(weapon, Prop_Send, "m_bBeingRepurposedForTaunt", 1);
-
-	if (armvmPath[0] != '\0') {
-		int armvm = TF2_SpawnWearableViewmodel();
-		
-		SetEntityModel(armvm, armvmPath);
-		TF2Util_EquipPlayerWearable(client, armvm);
-		
-		g_iLastArmModelRef[client] = EntIndexToEntRef(armvm);
-		
-		int clientView = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
-		SetEntProp(clientView, Prop_Send, "m_fEffects", EF_NODRAW);
-		
-		bitsActiveModels |= MODEL_ARM_ACTIVE;
-		
-		if (bitsActiveModels & MODEL_VIEW_ACTIVE == 0) {
-			// we didn't create a custom weapon viewmodel, so we need to render the original one
-			// for that weapon
-			int itemdef = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
+		if (armvmPath[0] || GetArmViewModel(client, armvmPath, sizeof(armvmPath))) {
+			int armvm = TF2_SpawnWearableViewmodel();
 			
-			if (!TF2Econ_GetItemDefinitionString(itemdef, "model_player", vm, sizeof(vm))) {
-				return;
+			SetEntityModel(armvm, armvmPath);
+			TF2Util_EquipPlayerWearable(client, armvm);
+			
+			g_iLastArmModelRef[client] = EntIndexToEntRef(armvm);
+			
+			int clientView = GetEntPropEnt(client, Prop_Send, "m_hViewModel");
+			SetEntProp(clientView, Prop_Send, "m_fEffects", EF_NODRAW);
+			
+			bitsActiveModels |= MODEL_ARM_ACTIVE;
+			
+			if (bitsActiveModels & MODEL_VIEW_ACTIVE == 0) {
+				// we didn't create a custom weapon viewmodel, so we need to render the original one
+				// for that weapon
+				int itemdef = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
+				
+				char vm[PLATFORM_MAX_PATH];
+				if (!TF2Econ_GetItemDefinitionString(itemdef, "model_player", vm, sizeof(vm))) {
+					return;
+				}
+				
+				int weaponvm = TF2_SpawnWearableViewmodel();
+				
+				SetEntityModel(weaponvm, vm);
+				TF2Util_EquipPlayerWearable(client, weaponvm);
+				
+				g_iLastViewmodelRef[client] = EntIndexToEntRef(weaponvm);
+				
+				bitsActiveModels |= MODEL_VIEW_ACTIVE;
 			}
-			
-			int weaponvm = TF2_SpawnWearableViewmodel();
-			
-			SetEntityModel(weaponvm, vm);
-			TF2Util_EquipPlayerWearable(client, weaponvm);
-			
-			g_iLastViewmodelRef[client] = EntIndexToEntRef(weaponvm);
-			
-			bitsActiveModels |= MODEL_VIEW_ACTIVE;
 		}
 	}
 }
